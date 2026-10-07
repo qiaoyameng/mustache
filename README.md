@@ -127,6 +127,43 @@ result in `5 &gt; 2`, where as the usage of `{{{variable}}}` will
 result in `5 > 2`.
 
 
+## Dynamic Partials
+
+A normal partial (`{{>header}}`) names its target in the template.
+A dynamic partial (`{{>*which}}`) instead reads the partial's name
+from the context at render time. The syntax is off by default; enable
+it by giving the view a `dynamic_partials` mapping of registered names to
+template sources:
+
+    view = Mustache.new(:dynamic_partials => {
+      'greeting' => 'Hello {{name}}!',
+      'farewell' => 'Bye {{name}}!',
+    })
+    view.template = '{{>*which}}'
+    view.render(:which => 'greeting', :name => 'Alice') # => "Hello Alice!"
+
+The mapping can also be set with `Mustache.dynamic_partials=` on a
+class or instance.
+
+Because the looked-up name must be a String present in the mapping,
+template data can select among pre-approved partials but can never
+supply template source itself. Resolution failures raise distinct
+errors, all subclasses of `Mustache::DynamicPartialError`:
+
+* `Mustache::DynamicPartialNameMissing` - the variable naming the
+  partial is missing from the context.
+* `Mustache::DynamicPartialNameInvalid` - the resolved name is not a
+  non-empty String (it is never coerced, e.g. via `to_s`).
+* `Mustache::DynamicPartialNotRegistered` - the name is not in the
+  view's `dynamic_partials` mapping.
+* `Mustache::DynamicPartialRecursionError` - dynamic partials nested
+  deeper than `Mustache::Context::MAX_DYNAMIC_PARTIAL_DEPTH`.
+
+Dynamic partials follow the same standalone indentation and delimiter
+rules as static partials, but they cannot be combined with the
+`inline_partials_at_compile_time` option.
+
+
 ## Dict-Style Views
 
 ctemplate and friends want you to hand a dictionary to the template

@@ -2,10 +2,34 @@ require 'mustache/context_miss'
 
 class Mustache
 
+  # Base class for errors raised while resolving a dynamic partial
+  # ({{>*name}}).
+  class DynamicPartialError < RuntimeError; end
+
+  # The variable naming a dynamic partial is missing from the context.
+  class DynamicPartialNameMissing < DynamicPartialError; end
+
+  # The resolved dynamic partial name is not a non-empty String. The
+  # name is never coerced (e.g. via #to_s); it must be a String as
+  # found in the context.
+  class DynamicPartialNameInvalid < DynamicPartialError; end
+
+  # The resolved dynamic partial name is not registered in the view's
+  # `dynamic_partials` mapping.
+  class DynamicPartialNotRegistered < DynamicPartialError; end
+
+  # Dynamic partials nested deeper than the allowed maximum depth.
+  class DynamicPartialRecursionError < DynamicPartialError; end
+
   # A Context represents the context which a Mustache template is
   # executed within. All Mustache tags reference keys in the Context.
   #
   class Context
+
+    # Maximum nesting depth for dynamically selected partials. A
+    # dynamic partial which (directly or indirectly) selects itself
+    # would recurse forever without a limit.
+    MAX_DYNAMIC_PARTIAL_DEPTH = 64
 
     # Initializes a Mustache::Context.
     #
@@ -14,6 +38,7 @@ class Mustache
     def initialize(mustache)
       @stack = [mustache]
       @partial_template_cache = {}
+      @dynamic_partial_depth = 0
     end
 
     # A {{>partial}} tag translates into a call to the context's
@@ -36,6 +61,52 @@ class Mustache
 
     def template_for_partial(partial)
       @partial_template_cache[partial] ||= Template.new(partial)
+    end
+
+    # Like `template_for_partial`, but compiles the partial with the
+    # given options. Used for dynamic partials so that a dynamically
+    # selected template keeps the originating view's parser options
+    # (e.g. nested {{>*name}} tags stay enabled).
+    def template_for_partial_with_options(partial, options)
+      @partial_template_cache[[partial, options]] ||= Template.new(partial, options)
+    end
+
+    # A {{>*partial}} tag translates into a call to the context's
+    # `dynamic_partial` method. The name is resolved from the context
+    # at render time and must be a String registered in the view's
+    # `dynamic_partials` mapping, so template data can select among
+    # caller-provided partials but can never supply template source
+    # itself.
+    def dynamic_partial(name, indentation = '')
+      if name.nil?
+        raise DynamicPartialNameMissing.new("Dynamic partial name variable is missing from the context")
+      end
+
+      unless name.is_a?(String)
+        raise DynamicPartialNameInvalid.new("Dynamic partial name must be a String, got #{name.class}")
+      end
+
+      if name.empty?
+        raise DynamicPartialNameInvalid.new("Dynamic partial name cannot be empty")
+      end
+
+      source = fetch_dynamic_partial(name)
+
+      if @dynamic_partial_depth >= MAX_DYNAMIC_PARTIAL_DEPTH
+        raise DynamicPartialRecursionError.new("Dynamic partials nested deeper than #{MAX_DYNAMIC_PARTIAL_DEPTH}")
+      end
+
+      # Indent the partial template by the given indentation.
+      part = source.to_s.gsub(/^/, indentation)
+
+      # Render with this same context so nested dynamic partials keep
+      # the view's mapping and the shared recursion depth.
+      @dynamic_partial_depth += 1
+      begin
+        template_for_partial_with_options(part, dynamic_partial_options).render(self)
+      ensure
+        @dynamic_partial_depth -= 1
+      end
     end
 
     # Find the first Mustache in the stack.
@@ -175,6 +246,31 @@ class Mustache
 
 
     private
+
+    # Parser options for dynamically selected partial templates, so
+    # nested {{>*name}} tags inside them stay enabled.
+    def dynamic_partial_options
+      mustache = mustache_in_stack
+      mapping = mustache && mustache.dynamic_partials
+      mapping ? {:dynamic_partials => mapping} : {}
+    end
+
+    # Looks up a dynamic partial name in the view's registered
+    # mapping. Raises DynamicPartialNotRegistered if the name is not
+    # registered.
+    def fetch_dynamic_partial(name)
+      mustache = mustache_in_stack
+      mapping = mustache && mustache.dynamic_partials
+      mapping = nil unless mapping.respond_to?(:key?)
+
+      if mapping && mapping.key?(name)
+        mapping[name]
+      elsif mapping && mapping.key?(name.to_sym)
+        mapping[name.to_sym]
+      else
+        raise DynamicPartialNotRegistered.new("Dynamic partial #{name.inspect} is not registered")
+      end
+    end
 
     # Fetches a hash key if it exists, or returns the given default.
     def find_in_hash(obj, key, default)

@@ -10,6 +10,7 @@ class Mustache
     @template_file = nil
     @raise_on_context_miss = nil
     @context_access_security_level = 2
+    @dynamic_partials = nil
   end
 
   def self.initialize_settings
@@ -20,6 +21,7 @@ class Mustache
     @template_file = nil
     @raise_on_context_miss = nil
     @context_access_security_level = 2
+    @dynamic_partials = nil
   end
 
   initialize_settings
@@ -191,6 +193,35 @@ class Mustache
     @template = templateify(template)
   end
 
+
+  #
+  # Dynamic Partials
+  #
+
+  # A mapping of names to template sources which dynamic partial tags
+  # ({{>*name}}) are allowed to render. Setting this mapping enables
+  # the dynamic partial syntax. The name is resolved from the context
+  # at render time and must be a String present in this mapping, so
+  # template data can select a partial but never provide template
+  # source itself.
+
+  def self.dynamic_partials
+    @dynamic_partials ||= inheritable_config_for(:dynamic_partials, nil)
+  end
+
+  def self.dynamic_partials=(mapping)
+    @dynamic_partials = mapping
+    @template = nil
+  end
+
+  def dynamic_partials
+    @dynamic_partials ||= self.class.dynamic_partials
+  end
+
+  def dynamic_partials=(mapping)
+    @dynamic_partials = mapping
+    @template = nil
+  end
 
   #
   # Raise on context miss

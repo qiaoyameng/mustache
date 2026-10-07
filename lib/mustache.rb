@@ -87,6 +87,10 @@ class Mustache
     @options = options
     
     initialize_settings
+
+    if options.is_a?(Hash) && options.key?(:dynamic_partials)
+      @dynamic_partials = options[:dynamic_partials]
+    end
   end
 
   # Instantiates an instance of this class and calls `render` with
@@ -300,12 +304,14 @@ class Mustache
   # @param [Template,String] obj      Turns `obj` into a template
   # @param [Hash]            options  Options for template creation
   def self.templateify(obj, options = {})
+    options = {:dynamic_partials => dynamic_partials}.merge(options) if dynamic_partials
     obj.is_a?(Template) ? obj : Template.new(obj, options)
   end
 
   def templateify(obj)
     opts = {:partial_resolver => self.method(:partial)}
     opts.merge!(@options) if @options.is_a?(Hash)
+    opts[:dynamic_partials] ||= dynamic_partials if dynamic_partials
     self.class.templateify(obj, opts)
   end
 

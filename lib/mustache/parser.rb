@@ -84,6 +84,10 @@ EOF
     # the rest only allow ALLOWED_CONTENT.
     ANY_CONTENT = [ '!', '=' ].map(&:freeze)
 
+    # These types of tags denote a partial and may use the dynamic
+    # name syntax (a leading `*`).
+    PARTIAL_TYPES = [ '<', '>' ].map(&:freeze)
+
     attr_reader :otag, :ctag
 
     # Accepts an options hash which does nothing but may be used in
@@ -91,6 +95,7 @@ EOF
     def initialize(options = {})
       @options = options
       @option_inline_partials_at_compile_time = options[:inline_partials_at_compile_time]
+      @option_dynamic_partials = options[:dynamic_partials]
       if @option_inline_partials_at_compile_time
         @partial_resolver = options[:partial_resolver]
         raise ArgumentError.new "Missing or invalid partial_resolver" unless @partial_resolver.respond_to? :call
@@ -151,6 +156,10 @@ EOF
       if ANY_CONTENT.include?(type)
         r = /\s*#{regexp(type)}?#{current_ctag_regex}/
         scan_until_exclusive(r)
+      elsif PARTIAL_TYPES.include?(type) && @scanner.scan(/\*/)
+        # A partial tag may start with a `*` to mark it as dynamic,
+        # e.g. {{>*partial_name}}.
+        '*' + @scanner.scan(ALLOWED_CONTENT)
       else
         @scanner.scan(ALLOWED_CONTENT)
       end
@@ -349,16 +358,39 @@ EOF
 
 
     def scan_tag_open_partial content, fetch, padding, pre_match_position
-      @result << if @option_inline_partials_at_compile_time
+      if content.start_with?('*')
+        scan_tag_dynamic_partial content, padding
+      elsif @option_inline_partials_at_compile_time
         partial = @partial_resolver.call content
         partial.gsub!(/^/, padding) unless padding.empty?
-        self.class.new(@options).compile partial
+        @result << self.class.new(@options).compile(partial)
       else
-        [:mustache, :partial, content, offset, padding]
+        @result << [:mustache, :partial, content, offset, padding]
       end
     end
     alias_method :'scan_tag_<', :scan_tag_open_partial
     alias_method :'scan_tag_>', :scan_tag_open_partial
+
+    # A dynamic partial ({{>*name}}) resolves its name from the
+    # context at render time. The syntax must be explicitly enabled
+    # with the :dynamic_partials option, and it cannot be combined
+    # with :inline_partials_at_compile_time because the selected
+    # partial is not known when the template is parsed.
+    def scan_tag_dynamic_partial content, padding
+      if @option_inline_partials_at_compile_time
+        error "Dynamic partials cannot be used with inline_partials_at_compile_time"
+      end
+
+      unless @option_dynamic_partials
+        error "Dynamic partials are not enabled"
+      end
+
+      name = content[1..-1]
+      error "Illegal content in tag" if name.empty?
+
+      fetch = [:mustache, :fetch, name.split('.')]
+      @result << [:mustache, :dynamic_partial, fetch, offset, padding]
+    end
 
 
     def scan_tag_unescaped content, fetch, padding, pre_match_position
