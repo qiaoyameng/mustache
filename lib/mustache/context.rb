@@ -1,4 +1,5 @@
 require 'mustache/context_miss'
+require 'mustache/dynamic_partial'
 
 class Mustache
 
@@ -7,6 +8,10 @@ class Mustache
   #
   class Context
 
+    # Default maximum nesting depth for dynamic partials. Can be
+    # overridden with the `dynamic_partial_max_depth` setting.
+    MAX_DYNAMIC_PARTIAL_DEPTH = 32
+
     # Initializes a Mustache::Context.
     #
     # @param [Mustache] mustache A Mustache instance.
@@ -14,6 +19,8 @@ class Mustache
     def initialize(mustache)
       @stack = [mustache]
       @partial_template_cache = {}
+      @dynamic_partial_template_cache = {}
+      @dynamic_partial_depth = 0
     end
 
     # A {{>partial}} tag translates into a call to the context's
@@ -36,6 +43,48 @@ class Mustache
 
     def template_for_partial(partial)
       @partial_template_cache[partial] ||= Template.new(partial)
+    end
+
+    # A {{>*dynamic_partial}} tag translates into a call to this
+    # method. The given names are looked up in the context (using the
+    # same dotted lookup as regular tags) and the resulting string
+    # must be registered in the view's `dynamic_partials` mapping.
+    # The mapping - not the context - provides the template source, so
+    # template data can never inject template code.
+    def dynamic_partial(names, indentation = '')
+      mustache = mustache_in_stack
+      mapping = mustache.respond_to?(:dynamic_partials) ? mustache.dynamic_partials : nil
+
+      name = dynamic_partial_name(names)
+      source = registered_dynamic_partial(mapping, name)
+
+      max = if mustache.respond_to?(:dynamic_partial_max_depth)
+        mustache.dynamic_partial_max_depth
+      end
+      max = nil unless max.is_a?(Integer) && max > 0
+      max ||= MAX_DYNAMIC_PARTIAL_DEPTH
+
+      if @dynamic_partial_depth >= max
+        raise DynamicPartialRecursionError.new("Dynamic partials nested too deeply (more than #{max} levels)")
+      end
+
+      @dynamic_partial_depth += 1
+      begin
+        # Indent the partial template by the given indentation, just
+        # like a standalone static partial.
+        part = source.to_s.gsub(/^/, indentation)
+        template_for_dynamic_partial(part, mapping).render(self)
+      ensure
+        @dynamic_partial_depth -= 1
+      end
+    end
+
+    # Dynamic partial templates are cached by their (indented) source,
+    # so a registered fragment keeps its compiled identity across
+    # renders while the *selection* is re-resolved every time.
+    def template_for_dynamic_partial(partial, mapping)
+      @dynamic_partial_template_cache[partial] ||=
+        Template.new(partial, :dynamic_partials => mapping)
     end
 
     # Find the first Mustache in the stack.
@@ -175,6 +224,61 @@ class Mustache
 
 
     private
+
+    # Resolves the name of a dynamic partial from the context. The
+    # lookup uses the same dotted resolution as regular tags, but the
+    # result is required to be a String - no implicit conversion (such
+    # as `to_s` or calling a Proc) is ever applied to the found value.
+    def dynamic_partial_name(names)
+      value = dynamic_partial_lookup(names)
+
+      if :__missing == value
+        raise DynamicPartialNameMissing.new("Can't find dynamic partial name '#{names.join('.')}' in context")
+      end
+
+      unless value.is_a?(String)
+        raise DynamicPartialNameInvalid.new("Dynamic partial name must be a String, got #{value.class}")
+      end
+
+      if value.empty?
+        raise DynamicPartialNameEmpty.new("Dynamic partial name is empty")
+      end
+
+      value
+    end
+
+    # Like the dotted lookup the Generator emits for regular tags, but
+    # with explicit miss detection so a missing variable can be
+    # reported separately from an empty or unregistered name.
+    def dynamic_partial_lookup(names)
+      first, *rest = names.map { |name| name.to_sym }
+
+      value = begin
+        fetch(first, :__missing)
+      rescue ContextMiss
+        :__missing
+      end
+
+      rest.each do |key|
+        break if :__missing == value || value.nil?
+        value = find(value, key, :__missing)
+      end
+
+      value.nil? ? :__missing : value
+    end
+
+    # Returns the template source registered under `name` in the
+    # caller-provided mapping, raising if the name was not registered.
+    def registered_dynamic_partial(mapping, name)
+      if mapping && mapping.respond_to?(:key?)
+        return mapping[name] if mapping.key?(name)
+
+        symbolized = name.to_sym
+        return mapping[symbolized] if mapping.key?(symbolized)
+      end
+
+      raise DynamicPartialNameNotRegistered.new("Dynamic partial #{name.inspect} is not registered")
+    end
 
     # Fetches a hash key if it exists, or returns the given default.
     def find_in_hash(obj, key, default)

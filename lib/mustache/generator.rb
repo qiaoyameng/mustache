@@ -164,6 +164,14 @@ class Mustache
       ev("ctx.partial(#{name.to_sym.inspect}, #{indentation.inspect})")
     end
 
+    # Fired when the compiler finds a dynamic partial. The partial
+    # name is resolved from the context at render time - never at
+    # compile time - so a compiled template can select different
+    # registered partials for different contexts.
+    def on_dynamic_partial(name, offset, indentation)
+      ev("ctx.dynamic_partial(#{name[2].inspect}, #{indentation.inspect})")
+    end
+
     # An unescaped tag.
     def on_utag(name, offset)
       ev(<<-compiled)

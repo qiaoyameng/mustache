@@ -300,12 +300,17 @@ class Mustache
   # @param [Template,String] obj      Turns `obj` into a template
   # @param [Hash]            options  Options for template creation
   def self.templateify(obj, options = {})
-    obj.is_a?(Template) ? obj : Template.new(obj, options)
+    return obj if obj.is_a?(Template)
+
+    options = options.dup
+    options[:dynamic_partials] ||= dynamic_partials if dynamic_partials
+    Template.new(obj, options)
   end
 
   def templateify(obj)
     opts = {:partial_resolver => self.method(:partial)}
     opts.merge!(@options) if @options.is_a?(Hash)
+    opts[:dynamic_partials] = dynamic_partials if dynamic_partials
     self.class.templateify(obj, opts)
   end
 

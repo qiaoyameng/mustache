@@ -115,6 +115,33 @@ the `mustache(5)` manpage or
 <http://mustache.github.io/mustache.5.html>.
 
 
+## Dynamic Partials
+
+Sometimes a template should select one of several pre-approved
+fragments based on the data being rendered - without letting the data
+carry template source itself. Dynamic partials are an opt-in syntax
+for exactly that:
+
+    view = Mustache.new(:dynamic_partials => {
+      'welcome'  => 'Welcome back, {{name}}!',
+      'goodbye'  => 'Goodbye, {{name}}!'
+    })
+    view.template = '{{>*notice}}'
+    view.render(:notice => 'welcome', :name => 'Alice')
+    # => "Welcome back, Alice!"
+
+The name after `{{>*` is resolved with the normal dotted lookup, but
+the result must be a String registered in the `:dynamic_partials`
+mapping - it is never implicitly converted, and missing variables,
+empty names, and unregistered names each raise their own error under
+`Mustache::DynamicPartialError`.
+
+Dynamic partials follow the same standalone indentation and delimiter
+rules as static partials, may recurse up to
+`:dynamic_partial_max_depth` levels (default 32), and cannot be
+combined with `:inline_partials_at_compile_time`.
+
+
 ## Escaping
 
 Mustache does escape all values when using the standard double

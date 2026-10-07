@@ -10,6 +10,8 @@ class Mustache
     @template_file = nil
     @raise_on_context_miss = nil
     @context_access_security_level = 2
+    @dynamic_partials = nil
+    @dynamic_partial_max_depth = nil
   end
 
   def self.initialize_settings
@@ -20,6 +22,8 @@ class Mustache
     @template_file = nil
     @raise_on_context_miss = nil
     @context_access_security_level = 2
+    @dynamic_partials = nil
+    @dynamic_partial_max_depth = nil
   end
 
   initialize_settings
@@ -251,6 +255,61 @@ class Mustache
     @context_access_security_level = integer
   end
 
+  #
+  # Dynamic partials
+  #
+
+  # Dynamic partials ({{>*name}}) select a partial at render time based
+  # on a context variable. This is an opt-in feature: the setting holds
+  # a caller-provided mapping of registered names to template sources.
+  # Only names present in this mapping can be rendered, so template
+  # data can pick a fragment but never supply template source itself.
+
+  def self.dynamic_partials
+    @dynamic_partials
+  end
+
+  def self.dynamic_partials=(mapping)
+    @dynamic_partials = mapping
+  end
+
+  # Instance level version of `Mustache.dynamic_partials`
+  def dynamic_partials
+    @dynamic_partials ||
+      (@options.is_a?(Hash) ? @options[:dynamic_partials] : nil) ||
+      self.class.dynamic_partials
+  end
+
+  def dynamic_partials=(mapping)
+    @dynamic_partials = mapping
+  end
+
+  #
+  # Dynamic partial max depth
+  #
+
+  # The maximum nesting depth allowed when dynamic partials include
+  # other dynamic partials. Defaults to
+  # `Mustache::Context::MAX_DYNAMIC_PARTIAL_DEPTH`.
+
+  def self.dynamic_partial_max_depth
+    @dynamic_partial_max_depth
+  end
+
+  def self.dynamic_partial_max_depth=(integer)
+    @dynamic_partial_max_depth = integer
+  end
+
+  # Instance level version of `Mustache.dynamic_partial_max_depth`
+  def dynamic_partial_max_depth
+    @dynamic_partial_max_depth ||
+      (@options.is_a?(Hash) ? @options[:dynamic_partial_max_depth] : nil) ||
+      self.class.dynamic_partial_max_depth
+  end
+
+  def dynamic_partial_max_depth=(integer)
+    @dynamic_partial_max_depth = integer
+  end
 
   #
   # View Namespace

@@ -96,6 +96,10 @@ EOF
         raise ArgumentError.new "Missing or invalid partial_resolver" unless @partial_resolver.respond_to? :call
       end
 
+      # Dynamic partials ({{>*name}}) are opt-in: the caller must
+      # provide a mapping of registered names via :dynamic_partials.
+      @option_dynamic_partials = options[:dynamic_partials]
+
       # Initialize default tags
       self.otag ||= '{{'
       self.ctag ||= '}}'
@@ -188,6 +192,8 @@ EOF
       type = @scanner.scan(self.class.valid_types)
       @scanner.skip(/\s*/)
 
+      dynamic_partial = scan_dynamic_partial_marker(type)
+
       # ANY_CONTENT tags allow any character inside of them, while
       # other tags (such as variables) are more strict.
       content = content_tags(type, current_ctag_regex)
@@ -198,7 +204,11 @@ EOF
       fetch = [:mustache, :fetch, content.split('.')]
       prev = @result
 
-      dispatch_based_on_type(type, content, fetch, padding, pre_match_position)
+      if dynamic_partial
+        scan_tag_dynamic_partial(content, fetch, padding, pre_match_position)
+      else
+        dispatch_based_on_type(type, content, fetch, padding, pre_match_position)
+      end
 
       # The closing } in unescaped tags is just a hack for
       # aesthetics.
@@ -254,6 +264,25 @@ EOF
         @scanner.pos -= @scanner.matched.size
         @scanner.pre_match[pos..-1]
       end
+    end
+
+    # Detects the `*` marker of a dynamic partial ({{>*name}}) right
+    # after a partial sigil. Dynamic partials are an opt-in feature
+    # and are incompatible with compile-time partial inlining, since
+    # the selected partial is only known at render time.
+    def scan_dynamic_partial_marker(type)
+      return false unless type == '>' || type == '<'
+      return false unless @scanner.scan(/\*\s*/)
+
+      if @option_inline_partials_at_compile_time
+        error "Dynamic partials cannot be used with :inline_partials_at_compile_time"
+      end
+
+      unless @option_dynamic_partials
+        error "Dynamic partial tag found but dynamic partials are not enabled"
+      end
+
+      true
     end
 
     def offset
@@ -359,6 +388,13 @@ EOF
     end
     alias_method :'scan_tag_<', :scan_tag_open_partial
     alias_method :'scan_tag_>', :scan_tag_open_partial
+
+    # A dynamic partial: the name is resolved from the context at
+    # render time and checked against the registered dynamic partials,
+    # so the token keeps the fetch expression instead of a static name.
+    def scan_tag_dynamic_partial content, fetch, padding, pre_match_position
+      @result << [:mustache, :dynamic_partial, fetch, offset, padding]
+    end
 
 
     def scan_tag_unescaped content, fetch, padding, pre_match_position
