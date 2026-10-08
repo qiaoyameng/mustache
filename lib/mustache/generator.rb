@@ -133,9 +133,9 @@ class Mustache
       when Proc
         #{proc_handling}
       when Array, Enumerator, Mustache::Enumerable
-        v.map { |_| ctx.push(_); r = #{code}; ctx.pop; r }.join
+        v.map { |_| ctx.push(_); begin; r = #{code}; ensure; ctx.pop; end; r }.join
       else
-        ctx.push(v); r = #{code}; ctx.pop; r
+        ctx.push(v); begin; r = #{code}; ensure; ctx.pop; end; r
       end
       compiled
     end

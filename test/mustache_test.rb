@@ -859,4 +859,65 @@ template
 
     assert_equal "\taa", instance.render(:"list@home" => [1, 2])
   end
+
+  # Renders the exploding template twice (first render compiles it, the
+  # second reuses the compiled template), asserting each failure raises
+  # the original error and leaves the context stack untouched. Then
+  # renders a template reading only an outer variable and asserts both
+  # the value and the stack are back to their original state.
+  def assert_section_failure_restores_stack(view, exploding_template)
+    view.template = exploding_template
+    stack_before = view.context.instance_variable_get(:@stack).dup
+
+    2.times do
+      error = assert_raises(ArgumentError) { view.render }
+      assert_equal 'deep getter exploded', error.message
+      refute_nil error.backtrace
+      refute_empty error.backtrace
+    end
+
+    view.template = '{{outer}}'
+    assert_equal 'outer-value', view.render
+    assert_equal stack_before, view.context.instance_variable_get(:@stack)
+  end
+
+  def test_object_section_exception_does_not_leak_context
+    assert_section_failure_restores_stack(ExplodingView.new,
+      '{{#middle}}{{#deep}}{{boom}}{{/deep}}{{/middle}}')
+  end
+
+  def test_array_section_exception_does_not_leak_context
+    assert_section_failure_restores_stack(ExplodingView.new,
+      '{{#items}}{{#deep}}{{boom}}{{/deep}}{{/items}}')
+  end
+
+  def test_nested_partial_exception_does_not_leak_context
+    assert_section_failure_restores_stack(ExplodingView.new,
+      '{{#middle}}{{>inner}}{{/middle}}')
+  end
+
+  def test_dynamic_lambda_exception_does_not_leak_context
+    assert_section_failure_restores_stack(ExplodingView.new,
+      '{{#exploding_lambda}}ignored{{/exploding_lambda}}')
+  end
+
+  def test_static_lambda_exception_does_not_leak_context
+    view = ExplodingView.new(:static_lambdas => true)
+    assert_section_failure_restores_stack(view,
+      '{{#exploding_lambda}}{{#middle}}{{#deep}}{{boom}}{{/deep}}{{/middle}}{{/exploding_lambda}}')
+  end
+
+  def test_section_exception_preserves_manually_pushed_frames
+    view = ExplodingView.new
+    view.template = '{{#middle}}{{#deep}}{{boom}}{{/deep}}{{/middle}}'
+
+    sentinel = { 'sentinel' => true }
+    view.context.push(sentinel)
+    stack_before = view.context.instance_variable_get(:@stack).dup
+
+    assert_raises(ArgumentError) { view.render }
+
+    assert_equal stack_before, view.context.instance_variable_get(:@stack)
+    assert_equal sentinel, view.context.instance_variable_get(:@stack).first
+  end
 end
