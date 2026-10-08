@@ -91,6 +91,7 @@ EOF
     def initialize(options = {})
       @options = options
       @option_inline_partials_at_compile_time = options[:inline_partials_at_compile_time]
+      @option_record_positions = options[:record_positions]
       if @option_inline_partials_at_compile_time
         @partial_resolver = options[:partial_resolver]
         raise ArgumentError.new "Missing or invalid partial_resolver" unless @partial_resolver.respond_to? :call
@@ -177,7 +178,7 @@ EOF
       # Don't touch the preceding whitespace unless we're matching the start
       # of a new line.
       unless start_of_line
-        @result << [:static, padding] unless padding.empty?
+        @result << static_token(padding, pre_match_position) unless padding.empty?
         pre_match_position += padding.length
         padding = ''
       end
@@ -218,7 +219,7 @@ EOF
         if @scanner.peek(2) =~ /\r?\n/ && SKIP_WHITESPACE.include?(type)
           @scanner.skip(/\r?\n/)
         else
-          prev.insert(last_index, [:static, padding]) unless padding.empty?
+          prev.insert(last_index, static_token(padding, pre_match_position)) unless padding.empty?
         end
       end
 
@@ -231,6 +232,7 @@ EOF
 
     # Try to find static text, e.g. raw HTML with no {{mustaches}}.
     def scan_text
+      start_pos = @scanner.pos
       text = scan_until_exclusive @otag_not_regex
 
       if text.nil?
@@ -242,7 +244,22 @@ EOF
 
       text.force_encoding(@encoding) if @encoding
 
-      @result << [:static, text] unless text.empty?
+      @result << static_token(text, start_pos) unless text.empty?
+    end
+
+    # Builds a [:static, text] token, appending the byte position of the
+    # text in the scanned template when position recording is enabled.
+    def static_token(text, position)
+      token = [:static, text]
+      token << position if @option_record_positions
+      token
+    end
+
+    # Appends the byte position of the tag's opening delimiter to the
+    # token when position recording is enabled.
+    def tag_token(token, padding, pre_match_position)
+      token << (pre_match_position + padding.length) if @option_record_positions
+      token
     end
 
     # Scans the string until the pattern is matched. Returns the substring
@@ -299,7 +316,7 @@ EOF
     # This function handles the cases where the scanned tag does not have
     # a type.
     def scan_tag_ content, fetch, padding, pre_match_position
-      @result << [:mustache, :etag, fetch, offset]
+      @result << tag_token([:mustache, :etag, fetch, offset], padding, pre_match_position)
     end
 
 
@@ -354,7 +371,7 @@ EOF
         partial.gsub!(/^/, padding) unless padding.empty?
         self.class.new(@options).compile partial
       else
-        [:mustache, :partial, content, offset, padding]
+        tag_token([:mustache, :partial, content, offset, padding], padding, pre_match_position)
       end
     end
     alias_method :'scan_tag_<', :scan_tag_open_partial
@@ -362,7 +379,7 @@ EOF
 
 
     def scan_tag_unescaped content, fetch, padding, pre_match_position
-      @result << [:mustache, :utag, fetch, offset]
+      @result << tag_token([:mustache, :utag, fetch, offset], padding, pre_match_position)
     end
     alias_method :'scan_tag_{', :'scan_tag_unescaped'
     alias_method :'scan_tag_&', :'scan_tag_unescaped'

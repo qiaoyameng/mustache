@@ -298,6 +298,32 @@ Finally, our template might look like this:
     </ul>
 
 
+## Source Maps
+
+When you need to know which part of a template produced a given part
+of the output (for example, to review generated emails), use
+`render_with_map`. It renders exactly like `render` but returns the
+rendered string together with a list of segments whose byte ranges
+cover the whole output:
+
+    output, map = Mustache.render_with_map("Hi {{thing}}!", :thing => "world")
+    output # => "Hi world!"
+    map.first.kind  # => :static
+    map.first.range # => 0...3 (byte range of the output)
+
+Each segment is a `Mustache::SourceMap::Segment` with a `kind`
+(`:static`, `:etag`, `:utag`, or `:indentation` for the indentation
+inserted by a standalone `{{>partial}}` tag), a byte `range` into the
+output, a `source`, and a byte `offset` into that source.
+
+The `source` identifies the main template, a partial (with the chain
+of partials through which it was included), or a template generated
+by a lambda at render time. Lambda-generated sources are `dynamic?`
+and their offsets refer to the generated source, never to a template
+file. Variable values are not recorded unless you pass
+`record_values: true`.
+
+
 ## Integrations
 
 ### Sinatra

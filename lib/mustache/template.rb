@@ -16,6 +16,7 @@ class Mustache
   # >> Mustache.render(template, hash)
   class Template
     attr_reader :source
+    attr_reader :options
 
     # Expects a Mustache template as a string along with a template
     # path, which it uses to find partials. Options may be passed.

@@ -3,6 +3,7 @@ require 'mustache/template'
 require 'mustache/context'
 require 'mustache/settings'
 require 'mustache/utils'
+require 'mustache/source_map'
 
 # Mustache is the base class from which your Mustache subclasses
 # should inherit (though it can be used on its own).
