@@ -97,6 +97,14 @@ class Mustache
     new.render(*args)
   end
 
+  # Instantiates an instance of this class and calls
+  # `render_with_map` with the passed args.
+  #
+  # @return [String, Array] The rendered template and its source map.
+  def self.render_with_map(*args)
+    new.render_with_map(*args)
+  end
+
   # Parses our fancy pants template file and returns normal file with
   # all special {{tags}} and {{#sections}}replaced{{/sections}}.
   #
@@ -135,6 +143,50 @@ class Mustache
     begin
       context.push(ctx)
       tpl.render(context)
+    ensure
+      context.pop
+    end
+  end
+
+  # Works exactly like #render, but returns a tuple of
+  # [rendered_string, segments]. The rendered string is
+  # byte-identical to the one #render produces for the same
+  # arguments. `segments` is a source map covering every byte of the
+  # output; see Mustache::SourceMapRenderer for the format.
+  #
+  # Getters and lambdas are called exactly as often as #render would
+  # call them, and variable values are not recorded in the map.
+  #
+  # @example Render a string template with a source map
+  #   output, map = Mustache.render_with_map("Hi {{thing}}!", :thing => :world)
+  #
+  # @param [String,Hash] data A String template or a Hash context.
+  # @param [Hash] ctx A Hash context if `data` is a String template.
+  # @return [Array(String, Array)] The rendered template and its source map.
+  def render_with_map(data = template, ctx = {})
+    case data
+    when Hash
+      ctx = data
+    when Symbol
+      self.template_name = data
+    end
+
+    tpl = case data
+    when Hash
+      templateify(template)
+    when Symbol
+      templateify(template)
+    else
+      templateify(data)
+    end
+
+    source = { :type => :template, :name => template_source_name(data) }
+
+    return tpl.render_with_map(context, source) if ctx == {}
+
+    begin
+      context.push(ctx)
+      tpl.render_with_map(context, source)
     ensure
       context.pop
     end
@@ -307,6 +359,17 @@ class Mustache
     opts = {:partial_resolver => self.method(:partial)}
     opts.merge!(@options) if @options.is_a?(Hash)
     self.class.templateify(obj, opts)
+  end
+
+  # The name used to identify the main template in source maps: the
+  # template file when there is one, the template name for
+  # file-less views, or a placeholder for inline String templates.
+  def template_source_name(data)
+    if data.is_a?(String)
+      '(inline)'
+    else
+      (template_file || template_name).to_s
+    end
   end
 
   # Return the value of the configuration setting on the superclass, or return

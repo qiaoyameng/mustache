@@ -2,6 +2,7 @@ require 'cgi'
 
 require 'mustache/parser'
 require 'mustache/generator'
+require 'mustache/source_map_renderer'
 
 class Mustache
   # A Template represents a Mustache template. It compiles and caches
@@ -42,6 +43,21 @@ class Mustache
 
       # Call the newly rewritten version of #render
       render(context)
+    end
+
+    # Renders the template like #render, but also returns a source
+    # map: an array of segments describing which source region
+    # produced each byte range of the output.
+    #
+    # Returns [output, segments]. The output is byte-identical to the
+    # result of #render. See Mustache::SourceMapRenderer for a
+    # description of the segment format.
+    #
+    # @param [Mustache::Context] context The context to render with.
+    # @param [Hash] source Identifies this template, e.g.
+    #                      { :type => :template, :name => "welcome" }.
+    def render_with_map(context, source = nil)
+      SourceMapRenderer.new(@options).render(self, context, source)
     end
 
     # Does the dirty work of transforming a Mustache template into an

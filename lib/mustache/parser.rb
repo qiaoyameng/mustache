@@ -177,7 +177,13 @@ EOF
       # Don't touch the preceding whitespace unless we're matching the start
       # of a new line.
       unless start_of_line
-        @result << [:static, padding] unless padding.empty?
+        unless padding.empty?
+          @result << if @options[:record_offsets]
+            [:static, padding, pre_match_position]
+          else
+            [:static, padding]
+          end
+        end
         pre_match_position += padding.length
         padding = ''
       end
@@ -218,7 +224,13 @@ EOF
         if @scanner.peek(2) =~ /\r?\n/ && SKIP_WHITESPACE.include?(type)
           @scanner.skip(/\r?\n/)
         else
-          prev.insert(last_index, [:static, padding]) unless padding.empty?
+          unless padding.empty?
+            prev.insert(last_index, if @options[:record_offsets]
+              [:static, padding, pre_match_position]
+            else
+              [:static, padding]
+            end)
+          end
         end
       end
 
@@ -231,6 +243,7 @@ EOF
 
     # Try to find static text, e.g. raw HTML with no {{mustaches}}.
     def scan_text
+      pos = @scanner.pos
       text = scan_until_exclusive @otag_not_regex
 
       if text.nil?
@@ -242,7 +255,11 @@ EOF
 
       text.force_encoding(@encoding) if @encoding
 
-      @result << [:static, text] unless text.empty?
+      if @options[:record_offsets]
+        @result << [:static, text, pos] unless text.empty?
+      else
+        @result << [:static, text] unless text.empty?
+      end
     end
 
     # Scans the string until the pattern is matched. Returns the substring
