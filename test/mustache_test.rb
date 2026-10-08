@@ -859,4 +859,109 @@ template
 
     assert_equal "\taa", instance.render(:"list@home" => [1, 2])
   end
+
+  def context_stack(view)
+    view.context.instance_variable_get(:@stack)
+  end
+
+  def assert_stack_restored_after_boom(view)
+    stack  = context_stack(view)
+    frames = stack.dup
+
+    # Once for the compile path, once for the compiled template.
+    2.times do
+      error = assert_raises(RuntimeError) { view.render }
+      assert_equal "boom", error.message
+      assert error.backtrace.any? { |line| line.include?("boom") }
+      assert_equal frames, stack
+    end
+
+    # A template reading only an outer variable sees the original value.
+    view.template = "{{name}}"
+    assert_equal "outer", view.render
+    assert_equal frames, stack
+  end
+
+  def new_leaky_view
+    view = Mustache.new
+    view[:name] = "outer"
+    view.context.push(:marker => "manual")
+    view
+  end
+
+  def test_object_section_exception_restores_context_stack
+    view = new_leaky_view
+
+    section = Object.new
+    def section.name; "leaked"; end
+    def section.boom; raise "boom"; end
+    view[:section] = section
+    view.template = "{{#section}}{{boom}}{{/section}}"
+
+    assert_stack_restored_after_boom(view)
+    assert_equal "manual", view.context[:marker]
+  end
+
+  def test_array_section_exception_restores_context_stack
+    view = new_leaky_view
+
+    good = Object.new
+    def good.value; "fine"; end
+    bad = Object.new
+    def bad.value; raise "boom"; end
+    view[:items] = [good, bad]
+    view.template = "{{#items}}{{value}}{{/items}}"
+
+    assert_stack_restored_after_boom(view)
+    assert_equal "manual", view.context[:marker]
+  end
+
+  def test_nested_partial_exception_restores_context_stack
+    klass = Class.new(Mustache) do
+      def partial(_name)
+        "{{#inner}}{{boom}}{{/inner}}"
+      end
+    end
+
+    view = klass.new
+    view[:name] = "outer"
+    view.context.push(:marker => "manual")
+
+    inner = Object.new
+    def inner.boom; raise "boom"; end
+    view[:inner]  = inner
+    view[:outer_section] = {}
+    view.template = "{{#outer_section}}{{>p}}{{/outer_section}}"
+
+    assert_stack_restored_after_boom(view)
+    assert_equal "manual", view.context[:marker]
+  end
+
+  def test_dynamic_lambda_exception_restores_context_stack
+    view = new_leaky_view
+
+    inner = Object.new
+    def inner.boom; raise "boom"; end
+    view[:inner]   = inner
+    view[:wrapped] = lambda { |_raw| "{{#inner}}{{boom}}{{/inner}}" }
+    view.template  = "{{#wrapped}}raw{{/wrapped}}"
+
+    assert_stack_restored_after_boom(view)
+    assert_equal "manual", view.context[:marker]
+  end
+
+  def test_static_lambda_exception_restores_context_stack
+    view = Mustache.new :static_lambdas => true
+    view[:name] = "outer"
+    view.context.push(:marker => "manual")
+
+    inner = Object.new
+    def inner.boom; raise "boom"; end
+    view[:inner]   = inner
+    view[:wrapped] = lambda { |rendered| rendered }
+    view.template  = "{{#wrapped}}{{#inner}}{{boom}}{{/inner}}{{/wrapped}}"
+
+    assert_stack_restored_after_boom(view)
+    assert_equal "manual", view.context[:marker]
+  end
 end
